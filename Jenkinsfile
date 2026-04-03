@@ -11,10 +11,8 @@ pipeline {
         DOCKER_USER = "surya8442"
         IMAGE_NAME = "sliding-block-puzzle-game"
         IMAGE_TAG = "v1"
-        environment {
         NEXUS_URL = 'http://13.127.246.228:8081/repository/puzzle/'
         NEXUS_CREDENTIALS = 'nexus-cred'
-        }
     }
 
     stages {
