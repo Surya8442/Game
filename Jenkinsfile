@@ -11,6 +11,10 @@ pipeline {
         DOCKER_USER = "surya8442"
         IMAGE_NAME = "sliding-block-puzzle-game"
         IMAGE_TAG = "v1"
+        environment {
+        NEXUS_URL = 'http://13.127.246.228:8081/repository/puzzle/'
+        NEXUS_CREDENTIALS = 'nexus-cred'
+        }
     }
 
     stages {
@@ -33,14 +37,16 @@ pipeline {
             }
         }
 
-        stage('JENKINS TO NEXUS') {
-            steps {
-            withMaven(jdk: 'JDK17', traceability: true) {
-                sh 'npm install'
-                sh 'npm run build'
-            }
+        stage('Upload Artifact to Nexus') {
+    steps {
+        withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIALS}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+            sh '''
+                zip -r sliding-block-puzzle-game.zip build/
+                curl -v -u $USER:$PASS --upload-file sliding-block-puzzle-game.zip $NEXUS_URL/sliding-block-puzzle-game-${BUILD_NUMBER}.zip
+            '''
         }
     }
+}
         
 
         stage('Sonar') {
