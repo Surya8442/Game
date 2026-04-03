@@ -94,6 +94,17 @@ pipeline {
             }
         }
     }
+    
+    stage('Deploy Monitoring Stack') {
+    steps {
+        export KUBECONFIG=/var/lib/jenkins/.kube/config {
+            sh '''
+            kubectl apply -f prometheus.yaml
+            kubectl apply -f grafana.yaml
+            '''
+        }
+      }
+    }  
 
     post {
         always {
