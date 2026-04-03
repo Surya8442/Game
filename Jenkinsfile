@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    tools {
+        nodejs 'NodeJS18' 
+    }
+
+    environment {
+        DOCKER_USER = "surya8442"
+        IMAGE_NAME = "sliding-block-puzzle-game"
+        IMAGE_TAG = "v1"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Surya8442/Game.git'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm run build'
+            }
+        }
+
+        stage('Sonar') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh 'npm install -g sonar-scanner'
+                    sh 'sonar-scanner -Dsonar.projectKey=puzzle-game -Dsonar.sources=src -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_AUTH_TOKEN'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh 'docker build -t $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG .'
+            }
+        }
+
+        stage('Push to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'Docker_cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh 'echo $PASS | docker login -u $USER --password-stdin'
+                    sh 'docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG'
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                export KUBECONFIG=/var/lib/jenkins/.kube/config
+
+                aws eks update-kubeconfig --region ap-south-1 --name mycluster
+
+                kubectl get nodes
+
+                kubectl apply -f deployment.yml
+                kubectl apply -f service.yml
+                '''
+            }
+        }
+
+    }
+}
