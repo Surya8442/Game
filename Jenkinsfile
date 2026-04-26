@@ -11,7 +11,7 @@ pipeline {
         IMAGE_TAG = "v1"
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
 
-        NEXUS_URL = "http://65.0.86.137:8081/repository/puzzlegame"
+        NEXUS_URL = "http://43.204.30.42:8081/repository/puzzlegame"
     }
 
     stages {
