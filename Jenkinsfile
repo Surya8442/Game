@@ -10,6 +10,8 @@ pipeline {
         IMAGE_NAME = "sliding-block-puzzle-game"
         IMAGE_TAG = "v1"
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
+
+        NEXUS_URL = "http://65.0.86.137:8081/repository/puzzlegame"
     }
 
     stages {
@@ -43,7 +45,7 @@ pipeline {
         stage('Quality Gate') {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
-                waitForQualityGate abortPipeline: true
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
@@ -51,6 +53,34 @@ pipeline {
         stage('Build') {
             steps {
                 sh 'npm run build'
+            }
+        }
+
+        stage('Package Artifact') {
+            steps {
+                sh '''
+                    if [ -d dist ]; then
+                        tar -czf app-${BUILD_NUMBER}.tar.gz dist
+                    else
+                        tar -czf app-${BUILD_NUMBER}.tar.gz .
+                    fi
+                '''
+            }
+        }
+
+        stage('Upload to Nexus') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'nexus-credentials',
+                    usernameVariable: 'NEXUS_USER',
+                    passwordVariable: 'NEXUS_PASS'
+                )]) {
+                    sh '''
+                        curl -v -u $NEXUS_USER:$NEXUS_PASS \
+                        --upload-file app-${BUILD_NUMBER}.tar.gz \
+                        $NEXUS_URL/app-${BUILD_NUMBER}.tar.gz
+                    '''
+                }
             }
         }
 
@@ -62,7 +92,11 @@ pipeline {
 
         stage('Push to DockerHub') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'Docker_cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: 'Docker_cred',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
                     sh '''
                         echo $PASS | docker login -u $USER --password-stdin
                         docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
@@ -84,15 +118,15 @@ pipeline {
 
     post {
         success {
-            echo "SUCCESS: Pipeline completed"
+            echo "SUCCESS: Pipeline completed successfully"
         }
 
         failure {
-            echo "FAILED: Check Jenkins logs"
+            echo "FAILED: Check Jenkins logs for errors"
         }
 
         always {
-            echo 'Pipeline execution completed.'
+            echo "Pipeline execution completed"
         }
     }
 }
