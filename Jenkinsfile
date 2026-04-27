@@ -8,29 +8,29 @@ pipeline {
     environment {
         DOCKER_USER = "surya8442"
         IMAGE_NAME = "sliding-block-puzzle-game"
-        IMAGE_TAG = "${BUILD_NUMBER}"   // dynamic tagging (better than v1)
+        IMAGE_TAG = "${BUILD_NUMBER}"
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
         NEXUS_URL = "http://13.232.28.159:8081/repository/puzzlegame"
         RECIPIENTS = "suryakandipalli@gmail.com"
+
+        CLUSTER_NAME = "mycluster"
+        PROJECT_NAME = "Sliding Puzzle Game"
     }
 
     stages {
 
-        // -------------------------------
         stage('Checkout') {
             steps {
                 git branch: 'main', url: 'https://github.com/Surya8442/Game.git'
             }
         }
 
-        // -------------------------------
         stage('Install Dependencies') {
             steps {
                 sh 'npm install'
             }
         }
 
-        // -------------------------------
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sq') {
@@ -45,15 +45,12 @@ pipeline {
             }
         }
 
-
-        // -------------------------------
         stage('Build') {
             steps {
                 sh 'npm run build'
             }
         }
 
-        // -------------------------------
         stage('Package Artifact') {
             steps {
                 sh '''
@@ -66,7 +63,6 @@ pipeline {
             }
         }
 
-        // -------------------------------
         stage('Upload to Nexus') {
             steps {
                 withCredentials([usernamePassword(
@@ -75,7 +71,7 @@ pipeline {
                     passwordVariable: 'NEXUS_PASS'
                 )]) {
                     sh '''
-                    curl -v -u $NEXUS_USER:$NEXUS_PASS \
+                    curl -u $NEXUS_USER:$NEXUS_PASS \
                     --upload-file app-${BUILD_NUMBER}.tar.gz \
                     $NEXUS_URL/app-${BUILD_NUMBER}.tar.gz
                     '''
@@ -83,7 +79,6 @@ pipeline {
             }
         }
 
-        // -------------------------------
         stage('Docker Build') {
             steps {
                 sh '''
@@ -93,7 +88,6 @@ pipeline {
             }
         }
 
-        // -------------------------------
         stage('Push to DockerHub') {
             steps {
                 withCredentials([usernamePassword(
@@ -110,7 +104,6 @@ pipeline {
             }
         }
 
-        // -------------------------------
         stage('Deploy to Kubernetes') {
             steps {
                 sh '''
@@ -118,13 +111,10 @@ pipeline {
 
                 kubectl apply -f deployment.yml
                 kubectl apply -f service.yml
-
-                
                 '''
             }
         }
 
-        // -------------------------------
         stage('Install Helm') {
             steps {
                 sh '''
@@ -138,7 +128,6 @@ pipeline {
             }
         }
 
-        // -------------------------------
         stage('Deploy Monitoring') {
             steps {
                 sh '''
@@ -151,7 +140,6 @@ pipeline {
             }
         }
 
-        // -------------------------------
         stage('Expose Grafana') {
             steps {
                 sh '''
@@ -161,39 +149,119 @@ pipeline {
                 kubectl patch svc monitoring-grafana \
                 -n monitoring \
                 -p '{"spec": {"type": "LoadBalancer"}}'
+                '''
+            }
+        }
 
-                kubectl get svc -n monitoring
+        stage('Expose Prometheus') {
+            steps {
+                sh '''
+                kubectl patch svc monitoring-kube-prometheus-prometheus \
+                -n monitoring \
+                -p '{"spec": {"type": "LoadBalancer"}}'
                 '''
             }
         }
     }
 
-    // ==========================================
+    // ===========================
     post {
 
         success {
-            emailext(
-                subject: "✅ SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-                Build SUCCESS 🎉
+            script {
 
-                Job: ${env.JOB_NAME}
-                Build: ${env.BUILD_NUMBER}
-                URL: ${env.BUILD_URL}
-                """,
-                to: "${env.RECIPIENTS}"
-            )
+                sleep 40
+
+                def APP_URL = ""
+                def GRAFANA_URL = ""
+                def PROM_URL = ""
+
+                for (int i = 0; i < 5; i++) {
+
+                    APP_URL = sh(
+                        script: "kubectl get svc puzzle-game-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || true",
+                        returnStdout: true
+                    ).trim()
+
+                    GRAFANA_URL = sh(
+                        script: "kubectl get svc monitoring-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || true",
+                        returnStdout: true
+                    ).trim()
+
+                    PROM_URL = sh(
+                        script: "kubectl get svc monitoring-kube-prometheus-prometheus -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || true",
+                        returnStdout: true
+                    ).trim()
+
+                    if (APP_URL && GRAFANA_URL && PROM_URL) {
+                        break
+                    }
+
+                    sleep 20
+                }
+
+                def DOCKER_IMAGE = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+                emailext(
+                    subject: "🚀 Deployment Successful - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    mimeType: 'text/html',
+                    body: """
+                    <html>
+                    <body style="font-family: Arial;">
+
+                    <h2 style="color:green;">🎉 Deployment Successful</h2>
+
+                    <h3>📌 Project Details</h3>
+                    <ul>
+                        <li><b>Project:</b> ${PROJECT_NAME}</li>
+                        <li><b>Cluster:</b> ${CLUSTER_NAME}</li>
+                    </ul>
+
+                    <h3>🐳 Docker Image</h3>
+                    <p>${DOCKER_IMAGE}</p>
+
+                    <h3>🌐 Application</h3>
+                    <a href="http://${APP_URL}">Open Application</a>
+
+                    <h3>📊 Grafana</h3>
+                    <a href="http://${GRAFANA_URL}">Open Grafana</a>
+
+                    <h3>🔥 Prometheus</h3>
+                    <a href="http://${PROM_URL}:9090">Open Prometheus</a>
+
+                    <h3>🛠 Jenkins</h3>
+                    <ul>
+                        <li>Job: ${env.JOB_NAME}</li>
+                        <li>Build: ${env.BUILD_NUMBER}</li>
+                        <li><a href="${env.BUILD_URL}">Open Build</a></li>
+                    </ul>
+
+                    </body>
+                    </html>
+                    """,
+                    to: "${env.RECIPIENTS}"
+                )
+            }
         }
 
         failure {
             emailext(
-                subject: "❌ FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                subject: "❌ Deployment Failed - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                mimeType: 'text/html',
                 body: """
-                Build FAILED ❌
+                <html>
+                <body style="font-family: Arial;">
 
-                Job: ${env.JOB_NAME}
-                Build: ${env.BUILD_NUMBER}
-                URL: ${env.BUILD_URL}
+                <h2 style="color:red;">❌ Deployment Failed</h2>
+
+                <p><b>Project:</b> Sliding Puzzle Game</p>
+                <p><b>Cluster:</b> mycluster</p>
+
+                <h3>🔍 Logs</h3>
+                <a href="${env.BUILD_URL}">View Build Logs</a>
+
+                </body>
+                </html>
                 """,
                 to: "${env.RECIPIENTS}"
             )
